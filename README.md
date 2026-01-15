@@ -65,4 +65,3 @@ This repository contains the security architecture and implementation reference 
 
 ## License
 Confidential & Proprietary.
-
