@@ -1,0 +1,83 @@
+name: Deploy Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  id-token: write # Required for OIDC
+  deployments: write
+
+concurrency:
+  group: production_deployment
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validation & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # In a real scenario, run unit tests, linting, etc. here
+      - name: Run Unit Tests
+        run: echo "Running tests..."
+
+  deploy-blue:
+    name: Deploy to Blue Environment
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: production-blue
+      url: https://blue.example.com
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsDeployRole
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform/
+
+      - name: Terraform Apply (Blue)
+        run: terraform apply -auto-approve -var="environment=blue"
+        working-directory: terraform/
+        env:
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+
+      - name: Verify Blue Health
+        run: |
+          # Simulate health check
+          echo "Checking Blue environment health..."
+          # curl -f https://blue.example.com/health || exit 1
+
+  switch-traffic:
+    name: Switch Traffic (Blue/Green)
+    needs: deploy-blue
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Switch Traffic to Blue
+        run: echo "Switching Route53/ALB weights to point to Blue..."
+
+  cleanup-green:
+    name: Cleanup Green Environment
+    needs: switch-traffic
+    runs-on: ubuntu-latest
+    steps:
+      - name: Destroy Green Resources (Optional)
+        run: echo "Scaling down Green environment..."
+
+  rollback:
+    name: Rollback
+    if: failure()
+    needs: [deploy-blue, switch-traffic]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revert Traffic
+        run: echo "Rolling back traffic to Green environment..."
+
